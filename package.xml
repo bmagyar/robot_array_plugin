@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>robot_array_plugin</name>
+  <version>0.0.0</version>
+  <description>The robot_array_plugin package</description>
+  <maintainer email="bence.magyar.robotics@gmail.com">Bence Magyar</maintainer>
+  <license>BSD</license>
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>liburdfdom-dev</build_depend>
+  <build_depend>liburdfdom-headers-dev</build_depend>
+
+  <depend>rviz</depend>
+  <depend>urdf</depend>
+  <depend>geometry_msgs</depend>
+
+  <export>
+    <rviz plugin="${prefix}/plugin_description.xml"/>
+  </export>
+
+</package>
