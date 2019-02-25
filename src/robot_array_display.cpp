@@ -35,6 +35,25 @@ inline void linkUpdaterStatusFunction(StatusProperty::Level level, const std::st
     display->setStatus(level, QString::fromStdString(link_name), QString::fromStdString(text));
 }
 
+inline Ogre::Vector3 toOgre(const geometry_msgs::Point& position)
+{
+    Ogre::Vector3 result;
+    result.x = position.x;
+    result.y = position.y;
+    result.z = position.z;
+    return result;
+}
+
+inline Ogre::Quaternion toOgre(const geometry_msgs::Quaternion& orientation)
+{
+    Ogre::Quaternion result;
+    result.x = orientation.x;
+    result.y = orientation.y;
+    result.z = orientation.z;
+    result.w = orientation.w;
+    return result;
+}
+
 RobotArrayDisplay::RobotArrayDisplay() : manual_object_(NULL)
 {
     color_property_ = new ColorProperty("Color", QColor(255, 25, 0), "Color to draw the arrows.", this);
@@ -231,17 +250,30 @@ void RobotArrayDisplay::processMessage(const geometry_msgs::PoseArray::ConstPtr&
         return;
     }
 
-    manual_object_->clear();
-
-    Ogre::Vector3 position;
-    Ogre::Quaternion orientation;
-    if (!context_->getFrameManager()->getTransform(msg->header, position, orientation))
+    if (msg->poses.empty())
     {
-        ROS_DEBUG("Error transforming from frame '%s' to frame '%s'", msg->header.frame_id.c_str(),
-                  qPrintable(fixed_frame_));
+        setStatus(rviz::StatusProperty::Error, "Topic", "Message has no poses!");
+        return;
     }
 
-    pose_valid_ = true;
+    setStatus(rviz::StatusProperty::Ok, "Topic", "Message contains " + QString::number(msg->poses.size()) + " poses");
+    //                  "Message contains " + QString::fromStdString(std::to_string(msg->poses.size())) + " poses");
+
+    manual_object_->clear();
+
+    const auto& pose = *(msg->poses.cbegin());
+    robot_->setPosition(toOgre(pose.position));
+    robot_->setOrientation(toOgre(pose.orientation));
+
+    // Ogre::Vector3 position;
+    // Ogre::Quaternion orientation;
+    // if (!context_->getFrameManager()->getTransform(msg->header, position, orientation))
+    // {
+    //     ROS_DEBUG("Error transforming from frame '%s' to frame '%s'", msg->header.frame_id.c_str(),
+    //               qPrintable(fixed_frame_));
+    // }
+
+    // pose_valid_ = true;
     // updateShapeVisibility();
 
     // scene_node_->setPosition(position);
@@ -268,7 +300,7 @@ void RobotArrayDisplay::processMessage(const geometry_msgs::PoseArray::ConstPtr&
     //         manual_object_->colour(color);
     //     }
     // }
-    // manual_object_->end();
+    manual_object_->end();
 
     context_->queueRender();
 }
