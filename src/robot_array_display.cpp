@@ -261,7 +261,7 @@ void RobotArrayDisplay::processMessage(const geometry_msgs::PoseArray::ConstPtr&
 
     manual_object_->clear();
 
-    const auto& pose = *(msg->poses.cbegin());
+    const auto& pose = *(msg->poses.cend());
     robot_->setPosition(toOgre(pose.position));
     robot_->setOrientation(toOgre(pose.orientation));
 
