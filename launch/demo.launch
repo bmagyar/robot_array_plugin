@@ -7,10 +7,10 @@
   <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
   <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" args="_use_gui:=True" />
 
-  <node pkg="tf" type="static_transform_publisher" name="static_transform_publisher_odom_base_link" output="screen" args="0 0 0 0 0 0 odom base_link 100"/>
+  <node pkg="tf" type="static_transform_publisher" name="static_transform_publisher_odom_base_footprint" output="screen" args="0 0 0 0 0 0 odom base_footprint 100"/>
 
   <node name="rosbagplaydata" pkg="rosbag" type="play" args="--clock --loop $(find robot_array_plugin)/resources/one_posearray.bag"/>
 
-  <node name="nodearray_rviz" pkg="rviz" type="rviz" args="-d $(find robot_array_plugin)/resources/demo.cfg"/>
+  <node name="nodearray_rviz" pkg="rviz" type="rviz" args="-d $(find robot_array_plugin)/resources/demo.cfg" output="screen"/>
 
 </launch>
