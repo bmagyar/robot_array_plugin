@@ -2,9 +2,10 @@
 #define RVIZ_ROBOT_ARRAY_DISPLAY_H_
 
 #include <geometry_msgs/PoseArray.h>
+#include <urdf/model.h>
 
-#include <rviz/message_filter_display.h>
-// #include <rviz/robot/robot.h>
+#include <rviz/display.h>
+#include <memory>
 
 namespace Ogre
 {
@@ -19,25 +20,26 @@ class EnumProperty;
 class Axes;
 class Robot;
 class StringProperty;
+class RosTopicProperty;
 }  // namespace rviz
 
 namespace robot_array_plugin
 {
 /** @brief Displays a geometry_msgs/PoseArray message as a bunch of line-drawn arrows. */
-class RobotArrayDisplay : public rviz::MessageFilterDisplay<geometry_msgs::PoseArray>
+class RobotArrayDisplay : public rviz::Display
 {
     Q_OBJECT
   public:
-    enum Shape
-    {
-        Arrow,
-        Axes,
-    };
     RobotArrayDisplay();
     virtual ~RobotArrayDisplay();
 
+    // Overrides from Display
     virtual void onInitialize();
+    virtual void update(float wall_dt, float ros_dt);
+    virtual void fixedFrameChanged();
     virtual void reset();
+
+    void clear();
 
   private Q_SLOTS:
     void updateVisualVisible();
@@ -45,41 +47,39 @@ class RobotArrayDisplay : public rviz::MessageFilterDisplay<geometry_msgs::PoseA
     void updateTfPrefix();
     void updateAlpha();
     void updateRobotDescription();
+    void changedTopic();
+    void updateSampling();
 
-  private:
-    virtual void processMessage(const geometry_msgs::PoseArray::ConstPtr& msg);
-
-    Ogre::ManualObject* manual_object_;
-
-    rviz::ColorProperty* color_property_;
-    std::vector<Ogre::SceneNode*> coords_nodes_;
-    rviz::Property* visual_enabled_property_;
-    rviz::Property* collision_enabled_property_;
-    rviz::FloatProperty* update_rate_property_;
-    rviz::StringProperty* robot_description_property_;
-    rviz::FloatProperty* alpha_property_;
-    rviz::StringProperty* tf_prefix_property_;
-
-    bool pose_valid_;
-
+  protected:
     /** @brief Loads a URDF from the ros-param named by our
-    * "Robot Description" property, iterates through the links, and
-    * loads any necessary models.
-    */
+     * "Robot Description" property, iterates through the links, and
+     * loads any necessary models. */
     virtual void load();
-    void clear();
 
     // overrides from Display
     virtual void onEnable();
     virtual void onDisable();
 
-    rviz::Robot* robot_;  ///< Handles actually drawing the robot
+    ros::Subscriber pose_array_sub_;
+    geometry_msgs::PoseArray::ConstPtr last_received_msg_;
+    urdf::Model urdf_description_;
+    std::shared_ptr<rviz::Robot> robot_;  ///< Handles actually drawing the robot
 
     bool has_new_transforms_;  ///< Callback sets this to tell our update function it needs to update the transforms
 
     float time_since_last_transform_;
 
     std::string robot_description_;
+
+    rviz::Property* visual_enabled_property_;
+    rviz::Property* collision_enabled_property_;
+    rviz::FloatProperty* update_rate_property_;
+    rviz::StringProperty* robot_description_property_;
+    rviz::RosTopicProperty* pose_array_topic_property_;
+    rviz::FloatProperty* sample_rate_property_;
+    rviz::FloatProperty* alpha_property_;
+    rviz::StringProperty* tf_prefix_property_;
+    void processMessage(const geometry_msgs::PoseArray::ConstPtr& msg);
 };
 
 }  // namespace robot_array_plugin

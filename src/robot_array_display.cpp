@@ -2,7 +2,6 @@
 #include <OgreSceneManager.h>
 #include <OgreSceneNode.h>
 #include <tinyxml.h>
-#include <urdf/model.h>
 
 #include <rviz/display_context.h>
 #include <rviz/frame_manager.h>
@@ -13,6 +12,7 @@
 #include <rviz/properties/float_property.h>
 #include <rviz/properties/property.h>
 #include <rviz/properties/string_property.h>
+#include <rviz/properties/ros_topic_property.h>
 #include <rviz/robot/robot.h>
 #include <rviz/robot/tf_link_updater.h>
 #include <rviz/validate_floats.h>
@@ -37,11 +37,20 @@ inline void linkUpdaterStatusFunction(StatusProperty::Level level, const std::st
 
 inline Ogre::Vector3 toOgre(const geometry_msgs::Point& position)
 {
+    using std::isfinite;
     Ogre::Vector3 result;
     result.x = position.x;
     result.y = position.y;
     result.z = position.z;
-    return result;
+    if (isfinite(result.x) and isfinite(result.y) and isfinite(result.z))
+    {
+        return result;
+    }
+    else
+    {
+        ROS_ERROR_STREAM(result << " vs " << position);
+        return Ogre::Vector3(0.0, 0.0, 0.0);
+    }
 }
 
 inline Ogre::Quaternion toOgre(const geometry_msgs::Quaternion& orientation)
@@ -54,15 +63,8 @@ inline Ogre::Quaternion toOgre(const geometry_msgs::Quaternion& orientation)
     return result;
 }
 
-RobotArrayDisplay::RobotArrayDisplay() : manual_object_(NULL)
+RobotArrayDisplay::RobotArrayDisplay() : rviz::Display(), has_new_transforms_(false), time_since_last_transform_(0.0f)
 {
-    color_property_ = new ColorProperty("Color", QColor(255, 25, 0), "Color to draw the arrows.", this);
-
-    // shape_property_ =
-    //     new rviz::EnumProperty("Shape", "Arrow", "Shape to display the pose as.", this, SLOT(updateShapeChoice()));
-    // shape_property_->addOption("Arrow", Arrow);
-    // shape_property_->addOption("Axes", Axes);
-
     visual_enabled_property_ =
         new Property("Visual Enabled", true, "Whether to display the visual representation of the robot.", this,
                      SLOT(updateVisualVisible()));
@@ -70,6 +72,12 @@ RobotArrayDisplay::RobotArrayDisplay() : manual_object_(NULL)
     collision_enabled_property_ =
         new Property("Collision Enabled", false, "Whether to display the collision representation of the robot.", this,
                      SLOT(updateCollisionVisible()));
+
+    update_rate_property_ =
+        new FloatProperty("Update Interval", 0, "Interval at which to update the links, in seconds. "
+                                                " 0 means to update every update cycle.",
+                          this);
+    update_rate_property_->setMin(0);
 
     alpha_property_ =
         new FloatProperty("Alpha", 1, "Amount of transparency to apply to the links.", this, SLOT(updateAlpha()));
@@ -80,6 +88,16 @@ RobotArrayDisplay::RobotArrayDisplay() : manual_object_(NULL)
         "Robot Description", "robot_description", "Name of the parameter to search for to load the robot description.",
         this, SLOT(updateRobotDescription()));
 
+    pose_array_topic_property_ = new rviz::RosTopicProperty(
+        "PoseArray Topic", "/pose_array", ros::message_traits::datatype<geometry_msgs::PoseArray>(),
+        "The topic on which a new trajectory as a set of poses is received", this, SLOT(changedTopic()), this);
+
+    sample_rate_property_ = new FloatProperty("Sample rate", 1, "Sample rate [0.0, 1.0]. Determines how often a "
+                                                                "pose should be displayed",
+                                              this, SLOT(updateSampling()));
+    sample_rate_property_->setMin(0.0);
+    sample_rate_property_->setMax(1.0);
+
     tf_prefix_property_ = new StringProperty(
         "TF Prefix", "", "Robot Model normally assumes the link name is the same as the tf frame name. "
                          " This option allows you to set a prefix.  Mainly useful for multi-robot situations.",
@@ -88,20 +106,11 @@ RobotArrayDisplay::RobotArrayDisplay() : manual_object_(NULL)
 
 RobotArrayDisplay::~RobotArrayDisplay()
 {
-    if (initialized())
-    {
-        scene_manager_->destroyManualObject(manual_object_);
-    }
 }
 
 void RobotArrayDisplay::onInitialize()
 {
-    MFDClass::onInitialize();
-    manual_object_ = scene_manager_->createManualObject();
-    manual_object_->setDynamic(true);
-    scene_node_->attachObject(manual_object_);
-
-    robot_ = new Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this);
+    robot_.reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
 
     updateVisualVisible();
     updateCollisionVisible();
@@ -121,6 +130,22 @@ void RobotArrayDisplay::updateRobotDescription()
         load();
         context_->queueRender();
     }
+}
+
+void RobotArrayDisplay::changedTopic()
+{
+    pose_array_sub_.shutdown();
+    // post-pone subscription if robot_state_ is not yet defined, i.e. onRobotModelLoaded() not yet called
+    if (!pose_array_topic_property_->getStdString().empty() && robot_)
+    {
+        pose_array_sub_ = update_nh_.subscribe(pose_array_topic_property_->getStdString(), 2,
+                                               &RobotArrayDisplay::processMessage, this);
+    }
+}
+
+void RobotArrayDisplay::updateSampling()
+{
+    ROS_INFO_STREAM("Updated sampling to " << sample_rate_property_->getFloat());
 }
 
 void RobotArrayDisplay::updateVisualVisible()
@@ -185,8 +210,7 @@ void RobotArrayDisplay::load()
         return;
     }
 
-    urdf::Model descr;
-    if (!descr.initXml(doc.RootElement()))
+    if (!urdf_description_.initXml(doc.RootElement()))
     {
         clear();
         setStatus(StatusProperty::Error, "URDF", "URDF failed Model parse");
@@ -194,9 +218,7 @@ void RobotArrayDisplay::load()
     }
 
     setStatus(StatusProperty::Ok, "URDF", "URDF parsed OK");
-    robot_->load(descr);
-    robot_->update(TFLinkUpdater(context_->getFrameManager(), boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
-                                 tf_prefix_property_->getStdString()));
+    robot_->load(urdf_description_);
 }
 
 void RobotArrayDisplay::onEnable()
@@ -211,30 +233,50 @@ void RobotArrayDisplay::onDisable()
     clear();
 }
 
-// void RobotArrayDisplay::allocateCoords(int num)
-// {
-//     if (num > coords_objects_.size())
-//     {
-//         for (size_t i = coords_objects_.size(); i < num; i++)
-//         {
-//             Ogre::SceneNode* scene_node = scene_node_->createChildSceneNode();
-//             rviz::Axes* axes = new rviz::Axes(scene_manager_, scene_node, axes_length_property_->getFloat(),
-//                                               axes_radius_property_->getFloat());
-//             coords_nodes_.push_back(scene_node);
-//             coords_objects_.push_back(axes);
-//         }
-//     }
-//     else if (num < coords_objects_.size())
-//     {
-//         for (int i = coords_objects_.size() - 1; num <= i; i--)
-//         {
-//             delete coords_objects_[i];
-//             scene_manager_->destroySceneNode(coords_nodes_[i]);
-//         }
-//         coords_objects_.resize(num);
-//         coords_nodes_.resize(num);
-//     }
-// }
+void RobotArrayDisplay::update(float wall_dt, float ros_dt)
+{
+    time_since_last_transform_ += wall_dt;
+    float rate = update_rate_property_->getFloat();
+    bool update = rate < 0.0001f || time_since_last_transform_ >= rate;
+
+    if (last_received_msg_)
+    {
+        if (has_new_transforms_ || update)
+        {
+            robot_->update(TFLinkUpdater(context_->getFrameManager(),
+                                         boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
+                                         tf_prefix_property_->getStdString()));
+            const auto& pose = last_received_msg_->poses[9];
+
+            robot_->setPosition(toOgre(pose.position));
+            robot_->setOrientation(toOgre(pose.orientation));
+            // ROS_ERROR_STREAM("Position of robot: " << robot_->getPosition() << " target is "
+            // << toOgre(pose.position) << " (" << pose.position << ")");
+            context_->queueRender();
+
+            has_new_transforms_ = false;
+            time_since_last_transform_ = 0.0f;
+        }
+    }
+}
+
+void RobotArrayDisplay::fixedFrameChanged()
+{
+    has_new_transforms_ = true;
+}
+
+void RobotArrayDisplay::clear()
+{
+    robot_->clear();
+    clearStatuses();
+    robot_description_.clear();
+}
+
+void RobotArrayDisplay::reset()
+{
+    Display::reset();
+    has_new_transforms_ = true;
+}
 
 bool validateFloats(const geometry_msgs::PoseArray& msg)
 {
@@ -256,76 +298,13 @@ void RobotArrayDisplay::processMessage(const geometry_msgs::PoseArray::ConstPtr&
         return;
     }
 
-    setStatus(rviz::StatusProperty::Ok, "Topic", "Message contains " + QString::number(msg->poses.size()) + " poses");
-    //                  "Message contains " + QString::fromStdString(std::to_string(msg->poses.size())) + " poses");
+    setStatus(rviz::StatusProperty::Ok, "Topic", "Message contains " + QString::number(msg->poses.size()) + " pose"
+                                                                                                            "s");
 
-    manual_object_->clear();
-
-    const auto& pose = *(msg->poses.cend());
-    robot_->setPosition(toOgre(pose.position));
-    robot_->setOrientation(toOgre(pose.orientation));
-
-    // Ogre::Vector3 position;
-    // Ogre::Quaternion orientation;
-    // if (!context_->getFrameManager()->getTransform(msg->header, position, orientation))
-    // {
-    //     ROS_DEBUG("Error transforming from frame '%s' to frame '%s'", msg->header.frame_id.c_str(),
-    //               qPrintable(fixed_frame_));
-    // }
-
-    // pose_valid_ = true;
-    // updateShapeVisibility();
-
-    // scene_node_->setPosition(position);
-    // scene_node_->setOrientation(orientation);
-
-    // manual_object_->clear();
-
-    // for (int i = 0; i < coords_nodes_.size(); i++)
-    //     coords_nodes_[i]->setVisible(false);
-    // Ogre::ColourValue color = color_property_->getOgreColor();
-    // size_t num_poses = msg->poses.size();
-    // manual_object_->estimateVertexCount(num_poses * 6);
-    // manual_object_->begin("BaseWhiteNoLighting", Ogre::RenderOperation::OT_LINE_LIST);
-    // for (size_t i = 0; i < num_poses; ++i)
-    // {
-    //     Ogre::Vector3 pos(msg->poses[i].position.x, msg->poses[i].position.y, msg->poses[i].position.z);
-    //     Ogre::Quaternion orient(msg->poses[i].orientation.w, msg->poses[i].orientation.x,
-    //     msg->poses[i].orientation.y,
-    //                             msg->poses[i].orientation.z);
-
-    //     for (int i = 0; i < 6; ++i)
-    //     {
-    //         //                manual_object_->position(vertices[i]);
-    //         manual_object_->colour(color);
-    //     }
-    // }
-    manual_object_->end();
-
-    context_->queueRender();
+    last_received_msg_ = msg;
 }
 
-void RobotArrayDisplay::reset()
-{
-    MFDClass::reset();
-    if (manual_object_)
-    {
-        manual_object_->clear();
-    }
-    // if (coords_objects_.size() > 0)
-    // {
-    //     allocateCoords(0);
-    // }
-}
-
-void RobotArrayDisplay::clear()
-{
-    robot_->clear();
-    clearStatuses();
-    robot_description_.clear();
-}
-
-}  // namespace rviz
+}  // namespace robot_array_plugin
 
 #include <pluginlib/class_list_macros.h>
 PLUGINLIB_EXPORT_CLASS(robot_array_plugin::RobotArrayDisplay, rviz::Display)
