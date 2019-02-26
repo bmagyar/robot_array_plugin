@@ -110,7 +110,10 @@ RobotArrayDisplay::~RobotArrayDisplay()
 
 void RobotArrayDisplay::onInitialize()
 {
-    robot_.reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+    robots_.resize(3);
+    robots_[0].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+    robots_[1].reset(new rviz::Robot(scene_node_, context_, "Robot2: " + getName().toStdString(), this));
+    robots_[2].reset(new rviz::Robot(scene_node_, context_, "Robot3: " + getName().toStdString(), this));
 
     updateVisualVisible();
     updateCollisionVisible();
@@ -119,7 +122,10 @@ void RobotArrayDisplay::onInitialize()
 
 void RobotArrayDisplay::updateAlpha()
 {
-    robot_->setAlpha(alpha_property_->getFloat());
+    for (const auto& robot : robots_)
+    {
+        robot->setAlpha(alpha_property_->getFloat());
+    }
     context_->queueRender();
 }
 
@@ -136,7 +142,7 @@ void RobotArrayDisplay::changedTopic()
 {
     pose_array_sub_.shutdown();
     // post-pone subscription if robot_state_ is not yet defined, i.e. onRobotModelLoaded() not yet called
-    if (!pose_array_topic_property_->getStdString().empty() && robot_)
+    if (!pose_array_topic_property_->getStdString().empty())
     {
         pose_array_sub_ = update_nh_.subscribe(pose_array_topic_property_->getStdString(), 2,
                                                &RobotArrayDisplay::processMessage, this);
@@ -150,13 +156,19 @@ void RobotArrayDisplay::updateSampling()
 
 void RobotArrayDisplay::updateVisualVisible()
 {
-    robot_->setVisualVisible(visual_enabled_property_->getValue().toBool());
+    for (const auto& robot : robots_)
+    {
+        robot->setVisualVisible(visual_enabled_property_->getValue().toBool());
+    }
     context_->queueRender();
 }
 
 void RobotArrayDisplay::updateCollisionVisible()
 {
-    robot_->setCollisionVisible(collision_enabled_property_->getValue().toBool());
+    for (const auto& robot : robots_)
+    {
+        robot->setCollisionVisible(collision_enabled_property_->getValue().toBool());
+    }
     context_->queueRender();
 }
 
@@ -218,18 +230,27 @@ void RobotArrayDisplay::load()
     }
 
     setStatus(StatusProperty::Ok, "URDF", "URDF parsed OK");
-    robot_->load(urdf_description_);
+    for (const auto& robot : robots_)
+    {
+        robot->load(urdf_description_);
+    }
 }
 
 void RobotArrayDisplay::onEnable()
 {
     load();
-    robot_->setVisible(true);
+    for (const auto& robot : robots_)
+    {
+        robot->setVisible(true);
+    }
 }
 
 void RobotArrayDisplay::onDisable()
 {
-    robot_->setVisible(false);
+    for (const auto& robot : robots_)
+    {
+        robot->setVisible(false);
+    }
     clear();
 }
 
@@ -241,17 +262,22 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
 
     if (last_received_msg_)
     {
-        if (has_new_transforms_ || update)
+        if ((not last_received_msg_->poses.empty()) and (has_new_transforms_ or update))
         {
-            robot_->update(TFLinkUpdater(context_->getFrameManager(),
-                                         boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
-                                         tf_prefix_property_->getStdString()));
-            const auto& pose = last_received_msg_->poses[9];
+            for (const auto& robot : robots_)
+            {
+                robot->update(TFLinkUpdater(context_->getFrameManager(),
+                                            boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
+                                            tf_prefix_property_->getStdString()));
+            }
 
-            robot_->setPosition(toOgre(pose.position));
-            robot_->setOrientation(toOgre(pose.orientation));
-            // ROS_ERROR_STREAM("Position of robot: " << robot_->getPosition() << " target is "
-            // << toOgre(pose.position) << " (" << pose.position << ")");
+            for (size_t i = 0; i < robots_.size(); ++i)
+            {
+                const auto& pose = last_received_msg_->poses[(i * 5) + 1];
+
+                robots_[i]->setPosition(toOgre(pose.position));
+                robots_[i]->setOrientation(toOgre(pose.orientation));
+            }
             context_->queueRender();
 
             has_new_transforms_ = false;
@@ -267,7 +293,10 @@ void RobotArrayDisplay::fixedFrameChanged()
 
 void RobotArrayDisplay::clear()
 {
-    robot_->clear();
+    for (const auto& robot : robots_)
+    {
+        robot->clear();
+    }
     clearStatuses();
     robot_description_.clear();
 }
@@ -298,9 +327,7 @@ void RobotArrayDisplay::processMessage(const geometry_msgs::PoseArray::ConstPtr&
         return;
     }
 
-    setStatus(rviz::StatusProperty::Ok, "Topic", "Message contains " + QString::number(msg->poses.size()) + " pose"
-                                                                                                            "s");
-
+    setStatus(rviz::StatusProperty::Ok, "Topic", "Message pose count " + QString::number(msg->poses.size()));
     last_received_msg_ = msg;
 }
 

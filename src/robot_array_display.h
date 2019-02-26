@@ -63,7 +63,7 @@ class RobotArrayDisplay : public rviz::Display
     ros::Subscriber pose_array_sub_;
     geometry_msgs::PoseArray::ConstPtr last_received_msg_;
     urdf::Model urdf_description_;
-    std::shared_ptr<rviz::Robot> robot_;  ///< Handles actually drawing the robot
+    std::vector<std::shared_ptr<rviz::Robot>> robots_;  ///< Handles actually drawing the robot
 
     bool has_new_transforms_;  ///< Callback sets this to tell our update function it needs to update the transforms
 
