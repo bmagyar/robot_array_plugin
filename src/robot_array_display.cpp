@@ -8,6 +8,7 @@
 #include <rviz/ogre_helpers/arrow.h>
 #include <rviz/ogre_helpers/axes.h>
 #include <rviz/properties/color_property.h>
+#include <rviz/properties/int_property.h>
 #include <rviz/properties/enum_property.h>
 #include <rviz/properties/float_property.h>
 #include <rviz/properties/property.h>
@@ -23,6 +24,7 @@ using rviz::FloatProperty;
 using rviz::Property;
 using rviz::Robot;
 using rviz::StringProperty;
+using rviz::IntProperty;
 using rviz::ColorProperty;
 using rviz::StatusProperty;
 using rviz::TFLinkUpdater;
@@ -92,16 +94,14 @@ RobotArrayDisplay::RobotArrayDisplay() : rviz::Display(), has_new_transforms_(fa
         "PoseArray Topic", "/pose_array", ros::message_traits::datatype<geometry_msgs::PoseArray>(),
         "The topic on which a new trajectory as a set of poses is received", this, SLOT(changedTopic()), this);
 
-    sample_rate_property_ = new FloatProperty("Sample rate", 1, "Sample rate [0.0, 1.0]. Determines how often a "
-                                                                "pose should be displayed",
-                                              this, SLOT(updateSampling()));
-    sample_rate_property_->setMin(0.0);
-    sample_rate_property_->setMax(1.0);
-
     tf_prefix_property_ = new StringProperty(
         "TF Prefix", "", "Robot Model normally assumes the link name is the same as the tf frame name. "
                          " This option allows you to set a prefix.  Mainly useful for multi-robot situations.",
         this, SLOT(updateTfPrefix()));
+
+    num_robots_to_display_property_ = new IntProperty("Number of robots to displaz", 3.0, "Number of robots to draw",
+                                                      this, SLOT(updateNumRobotsToDisplay()));
+    num_robots_to_display_property_->setMin(1);
 }
 
 RobotArrayDisplay::~RobotArrayDisplay()
@@ -110,10 +110,12 @@ RobotArrayDisplay::~RobotArrayDisplay()
 
 void RobotArrayDisplay::onInitialize()
 {
-    robots_.resize(3);
+    robots_.resize(5);
     robots_[0].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
-    robots_[1].reset(new rviz::Robot(scene_node_, context_, "Robot2: " + getName().toStdString(), this));
-    robots_[2].reset(new rviz::Robot(scene_node_, context_, "Robot3: " + getName().toStdString(), this));
+    robots_[1].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+    robots_[2].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+    robots_[3].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+    robots_[4].reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
 
     updateVisualVisible();
     updateCollisionVisible();
@@ -149,11 +151,6 @@ void RobotArrayDisplay::changedTopic()
     }
 }
 
-void RobotArrayDisplay::updateSampling()
-{
-    ROS_INFO_STREAM("Updated sampling to " << sample_rate_property_->getFloat());
-}
-
 void RobotArrayDisplay::updateVisualVisible()
 {
     for (const auto& robot : robots_)
@@ -176,6 +173,24 @@ void RobotArrayDisplay::updateTfPrefix()
 {
     clearStatuses();
     context_->queueRender();
+}
+
+void RobotArrayDisplay::updateNumRobotsToDisplay()
+{
+    const int new_num_robots = num_robots_to_display_property_->getInt();
+    ROS_INFO_STREAM("Updated num robots to display to " << new_num_robots);
+
+    robots_.clear();
+    robots_.resize(new_num_robots);
+    for (auto& robot : robots_)
+    {
+        robot.reset(new rviz::Robot(scene_node_, context_, "Robot: " + getName().toStdString(), this));
+        robot->load(urdf_description_);
+        robot->setVisualVisible(visual_enabled_property_->getValue().toBool());
+        robot->setCollisionVisible(collision_enabled_property_->getValue().toBool());
+        robot->setAlpha(alpha_property_->getFloat());
+        robot->setVisible(true);
+    }
 }
 
 void RobotArrayDisplay::load()
@@ -254,6 +269,20 @@ void RobotArrayDisplay::onDisable()
     clear();
 }
 
+std::vector<size_t> generateIndices(size_t num_poses, size_t desired_num)
+{
+    const size_t pose_index_step = num_poses / desired_num;
+
+    std::vector<size_t> result;
+    for (int i = 0; i < desired_num - 1; ++i)
+    {
+        result.push_back(i * pose_index_step);
+    }
+    result.push_back(num_poses - 1);
+
+    return result;
+}
+
 void RobotArrayDisplay::update(float wall_dt, float ros_dt)
 {
     time_since_last_transform_ += wall_dt;
@@ -264,6 +293,9 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
     {
         if ((not last_received_msg_->poses.empty()) and (has_new_transforms_ or update))
         {
+            const size_t num_poses_to_display = std::min(last_received_msg_->poses.size(), robots_.size());
+            ROS_ERROR_STREAM("Displaying " << num_poses_to_display << " poses");
+
             for (const auto& robot : robots_)
             {
                 robot->update(TFLinkUpdater(context_->getFrameManager(),
@@ -271,17 +303,20 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
                                             tf_prefix_property_->getStdString()));
             }
 
-            for (size_t i = 0; i < robots_.size(); ++i)
+            const std::vector<size_t> pose_indices_to_display =
+                generateIndices(last_received_msg_->poses.size(), num_poses_to_display);
+            for (size_t i = 0; i < pose_indices_to_display.size(); ++i)
             {
-                const auto& pose = last_received_msg_->poses[(i * 5) + 1];
+                const auto& pose = last_received_msg_->poses[pose_indices_to_display[i]];
 
                 robots_[i]->setPosition(toOgre(pose.position));
                 robots_[i]->setOrientation(toOgre(pose.orientation));
             }
+
             context_->queueRender();
 
             has_new_transforms_ = false;
-            time_since_last_transform_ = 0.0f;
+            time_since_last_transform_ = 0.0;
         }
     }
 }

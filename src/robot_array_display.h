@@ -21,6 +21,7 @@ class Axes;
 class Robot;
 class StringProperty;
 class RosTopicProperty;
+class IntProperty;
 }  // namespace rviz
 
 namespace robot_array_plugin
@@ -48,7 +49,7 @@ class RobotArrayDisplay : public rviz::Display
     void updateAlpha();
     void updateRobotDescription();
     void changedTopic();
-    void updateSampling();
+    void updateNumRobotsToDisplay();
 
   protected:
     /** @brief Loads a URDF from the ros-param named by our
@@ -76,9 +77,9 @@ class RobotArrayDisplay : public rviz::Display
     rviz::FloatProperty* update_rate_property_;
     rviz::StringProperty* robot_description_property_;
     rviz::RosTopicProperty* pose_array_topic_property_;
-    rviz::FloatProperty* sample_rate_property_;
     rviz::FloatProperty* alpha_property_;
     rviz::StringProperty* tf_prefix_property_;
+    rviz::IntProperty* num_robots_to_display_property_;
     void processMessage(const geometry_msgs::PoseArray::ConstPtr& msg);
 };
 
