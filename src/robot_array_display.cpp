@@ -298,6 +298,7 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
 
             for (const auto& robot : robots_)
             {
+                robot->setVisible(false); // turn them off, in case we have more robots than poses
                 robot->update(TFLinkUpdater(context_->getFrameManager(),
                                             boost::bind(linkUpdaterStatusFunction, _1, _2, _3, this),
                                             tf_prefix_property_->getStdString()));
@@ -309,6 +310,7 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
             {
                 const auto& pose = last_received_msg_->poses[pose_indices_to_display[i]];
 
+                robots_[i]->setVisible(true);
                 robots_[i]->setPosition(toOgre(pose.position));
                 robots_[i]->setOrientation(toOgre(pose.orientation));
             }
