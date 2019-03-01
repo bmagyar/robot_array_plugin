@@ -50,7 +50,6 @@ inline Ogre::Vector3 toOgre(const geometry_msgs::Point& position)
     }
     else
     {
-        ROS_ERROR_STREAM(result << " vs " << position);
         return Ogre::Vector3(0.0, 0.0, 0.0);
     }
 }
@@ -294,7 +293,6 @@ void RobotArrayDisplay::update(float wall_dt, float ros_dt)
         if ((not last_received_msg_->poses.empty()) and (has_new_transforms_ or update))
         {
             const size_t num_poses_to_display = std::min(last_received_msg_->poses.size(), robots_.size());
-            ROS_ERROR_STREAM("Displaying " << num_poses_to_display << " poses");
 
             for (const auto& robot : robots_)
             {
